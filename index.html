@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#070a12" />
-<title>贪吃蛇 · 横屏加速版</title>
+<title>贪吃蛇 · 摇杆</title>
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,24 +45,19 @@
     best: Number(localStorage.getItem('snake_joy_best') || 0) || 0,
     time: 0,
     shake: 0,
-    isPortrait: false,
   };
 
   const snake = {
     x: 0, y: 0,
     angle: 0,
-    speed: 3.0,
-    radius: 10,
-    length: 150,
+    speed: 2.6,
+    radius: 9,
+    length: 140,
     path: [],     // 头在 index 0
   };
 
-  let foods = [];
-  const particles = [];
-  const keys = {};
+  const food = { x: 0, y: 0, r: 9 };
 
-  /* ---------------- 控件 ---------------- */
-  // 左侧摇杆
   const joy = {
     base: { x: 0, y: 0 },
     knob: { x: 0, y: 0 },
@@ -72,18 +67,14 @@
     pid: null,
   };
 
-  // 右侧加速键
-  const boostBtn = {
-    x: 0, y: 0, r: 45,
-    active: false, pid: null
-  };
+  const particles = [];
+  const keys = {};
 
   /* ---------------- 尺寸 ---------------- */
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth;
     H = window.innerHeight;
-    state.isPortrait = H > W;
 
     canvas.width = Math.round(W * DPR);
     canvas.height = Math.round(H * DPR);
@@ -92,43 +83,38 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
     const s = Math.min(W, H);
-    
-    // 左手摇杆（左下角）
-    joy.radius = clamp(s * 0.13, 40, 70);
-    joy.base.x = joy.radius + 40;
+    joy.radius = clamp(s * 0.105, 42, 76);
+    joy.base.x = joy.radius + 34;
     joy.base.y = H - joy.radius - 40;
     if (!joy.active) {
       joy.knob.x = joy.base.x;
       joy.knob.y = joy.base.y;
     }
 
-    // 右手加速键（右下角）
-    boostBtn.r = joy.radius;
-    boostBtn.x = W - joy.radius - 40;
-    boostBtn.y = H - joy.radius - 40;
+    snake.radius = clamp(s * 0.016, 6.5, 12);
 
-    snake.radius = clamp(s * 0.02, 7, 14);
-
-    bgGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.8);
+    // 背景渐变缓存
+    bgGrad = ctx.createRadialGradient(W / 2, H * 0.44, 0, W / 2, H * 0.44, Math.max(W, H) * 0.8);
     bgGrad.addColorStop(0, 'rgba(28, 82, 92, 0.55)');
     bgGrad.addColorStop(0.45, 'rgba(15, 40, 62, 0.35)');
     bgGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
-    if (snake.path.length && !state.isPortrait) {
+    // 防止越界
+    if (snake.path.length) {
       snake.x = clamp(snake.x, snake.radius, W - snake.radius);
       snake.y = clamp(snake.y, snake.radius, H - snake.radius);
     }
   }
 
-  /* ---------------- 逻辑 ---------------- */
+  /* ---------------- 重置 ---------------- */
   function reset() {
     const s = Math.min(W, H);
-    snake.radius = clamp(s * 0.02, 7, 14);
+    snake.radius = clamp(s * 0.016, 6.5, 12);
     snake.x = W * 0.5;
     snake.y = H * 0.5;
     snake.angle = 0;
-    snake.speed = 3.0;
-    snake.length = snake.radius * 15;
+    snake.speed = 2.6;
+    snake.length = snake.radius * 16;
 
     snake.path = [];
     for (let i = 0; i < 90; i++) {
@@ -140,41 +126,33 @@
     state.shake = 0;
     state.overAt = 0;
     particles.length = 0;
-    foods = [];
-    spawnFood(6); // 初始生成6个食物
+
+    spawnFood();
   }
 
-  function spawnFood(count = 1) {
-    if (state.isPortrait) return;
-    const m = 40;
-    for (let c = 0; c < count; c++) {
-      let best = null;
-      for (let i = 0; i < 60; i++) {
-        const x = m + Math.random() * (W - m * 2);
-        const y = m + Math.random() * (H - m * 2);
-        
-        // 避开摇杆和加速键区域
-        if (Math.hypot(x - joy.base.x, y - joy.base.y) < joy.radius + 40) continue;
-        if (Math.hypot(x - boostBtn.x, y - boostBtn.y) < boostBtn.r + 40) continue;
-        // 别生成在蛇头附近
-        if (Math.hypot(x - snake.x, y - snake.y) < 100) continue;
+  /* ---------------- 食物 ---------------- */
+  function spawnFood() {
+    const m = 42;
+    const minD = Math.min(W, H) * 0.22;
+    let best = null;
 
-        // 避免和其他食物太近
-        let tooClose = false;
-        for (let f of foods) {
-          if (Math.hypot(x - f.x, y - f.y) < 70) { tooClose = true; break; }
-        }
-        if (tooClose) continue;
+    for (let i = 0; i < 80; i++) {
+      const x = m + Math.random() * (W - m * 2);
+      const y = m + Math.random() * (H - m * 2);
 
-        best = { x, y, r: snake.radius * 0.9, phase: Math.random() * Math.PI * 2 };
-        break;
-      }
-      // 兜底生成
-      if (!best) {
-        best = { x: W * 0.5 + (Math.random() - 0.5) * 150, y: H * 0.3, r: snake.radius * 0.9, phase: 0 };
-      }
-      foods.push(best);
+      // 别生成在摇杆下面
+      if (Math.hypot(x - joy.base.x, y - joy.base.y) < joy.radius + 55) continue;
+      // 别离蛇头太近
+      if (Math.hypot(x - snake.x, y - snake.y) < minD) continue;
+
+      best = { x, y };
+      break;
     }
+    if (!best) best = { x: W * 0.5, y: H * 0.28 };
+
+    food.x = best.x;
+    food.y = best.y;
+    food.r = snake.radius * 0.95;
   }
 
   /* ---------------- 事件 ---------------- */
@@ -196,48 +174,33 @@
 
   function onDown(e) {
     e.preventDefault();
+
     if (state.over) {
-      if (performance.now() > state.overAt + 300) reset();
+      if (performance.now() > state.overAt + 350) reset();
       return;
     }
-    if (state.isPortrait) return;
 
-    // 判断点在哪边
-    if (e.clientX < W / 2) {
-      // 左半屏 -> 摇杆
-      joy.pid = e.pointerId;
-      joy.active = true;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-      updateJoy(e.clientX, e.clientY);
-    } else {
-      // 右半屏 -> 加速
-      boostBtn.pid = e.pointerId;
-      boostBtn.active = true;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    }
+    joy.pid = e.pointerId;
+    joy.active = true;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    updateJoy(e.clientX, e.clientY);
   }
 
   function onMove(e) {
-    if (joy.active && e.pointerId === joy.pid) {
-      e.preventDefault();
-      updateJoy(e.clientX, e.clientY);
-    }
+    if (!joy.active || e.pointerId !== joy.pid) return;
+    e.preventDefault();
+    updateJoy(e.clientX, e.clientY);
   }
 
   function onUp(e) {
-    if (e.pointerId === joy.pid) {
-      joy.active = false;
-      joy.pid = null;
-      joy.mag = 0;
-      joy.vx = 0;
-      joy.vy = 0;
-      joy.knob.x = joy.base.x;
-      joy.knob.y = joy.base.y;
-    }
-    if (e.pointerId === boostBtn.pid) {
-      boostBtn.active = false;
-      boostBtn.pid = null;
-    }
+    if (e.pointerId !== joy.pid) return;
+    joy.active = false;
+    joy.pid = null;
+    joy.mag = 0;
+    joy.vx = 0;
+    joy.vy = 0;
+    joy.knob.x = joy.base.x;
+    joy.knob.y = joy.base.y;
   }
 
   canvas.addEventListener('pointerdown', onDown, { passive: false });
@@ -251,20 +214,20 @@
     keys[k] = true;
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
     if (state.over && (k === ' ' || k === 'enter')) {
-      if (performance.now() > state.overAt + 300) reset();
+      if (performance.now() > state.overAt + 350) reset();
     }
   });
   window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
   window.addEventListener('resize', () => {
     resize();
-    if (!state.over && !state.isPortrait) {
+    if (!state.over) {
       snake.x = clamp(snake.x, snake.radius, W - snake.radius);
       snake.y = clamp(snake.y, snake.radius, H - snake.radius);
     }
   });
 
-  /* ---------------- 核心逻辑 ---------------- */
+  /* ---------------- 逻辑 ---------------- */
   function trimPath() {
     const need = snake.length + 80;
     let total = 0;
@@ -275,6 +238,33 @@
       if (total > need) break;
     }
     if (i < snake.path.length) snake.path.length = i + 1;
+  }
+
+  function eat() {
+    state.score++;
+    if (state.score > state.best) {
+      state.best = state.score;
+      try { localStorage.setItem('snake_joy_best', String(state.best)); } catch (_) {}
+    }
+
+    snake.length += snake.radius * 1.7;
+    snake.speed = Math.min(5.6, snake.speed + 0.055);
+    state.shake = Math.min(1, state.shake + 0.55);
+
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.8 + Math.random() * 3.2;
+      particles.push({
+        x: food.x, y: food.y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 1,
+        r: 1 + Math.random() * 3,
+        hue: 35 + Math.random() * 35,
+      });
+    }
+
+    spawnFood();
   }
 
   function gameOver() {
@@ -291,7 +281,7 @@
     state.time += dt * 16.667;
     if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 0.055);
 
-    // 粒子更新
+    // 粒子
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx * dt;
@@ -303,9 +293,9 @@
       if (p.life <= 0) particles.splice(i, 1);
     }
 
-    if (state.over || state.isPortrait) return;
+    if (state.over) return;
 
-    // 1. 获取输入
+    // ---- 输入 ----
     let inX = 0, inY = 0, hasInput = false;
 
     if (joy.active && joy.mag > 0.12) {
@@ -313,7 +303,6 @@
       inY = joy.vy;
       hasInput = true;
     } else {
-      // 键盘支持
       let kx = 0, ky = 0;
       if (keys['arrowleft'] || keys['a']) kx -= 1;
       if (keys['arrowright'] || keys['d']) kx += 1;
@@ -327,60 +316,29 @@
       }
     }
 
-    // 2. 转向
+    // ---- 转向 ----
     if (hasInput) {
       const target = Math.atan2(inY, inX);
       let diff = target - snake.angle;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const maxTurn = 0.12 * dt;
+      const maxTurn = 0.115 * dt;
       snake.angle += clamp(diff, -maxTurn, maxTurn);
     }
 
-    // 3. 加速与移动
-    let currentSpeed = snake.speed;
-    if (boostBtn.active || keys['shift']) {
-      currentSpeed *= 1.8; // 按住加速键速度提升80%
-    }
-    
-    const step = currentSpeed * dt;
+    // ---- 移动 ----
+    const step = snake.speed * dt;
     snake.x += Math.cos(snake.angle) * step;
     snake.y += Math.sin(snake.angle) * step;
 
     snake.path.unshift({ x: snake.x, y: snake.y });
     trimPath();
 
-    // 4. 吃食物
-    for (let i = foods.length - 1; i >= 0; i--) {
-      const f = foods[i];
-      if (Math.hypot(snake.x - f.x, snake.y - f.y) < snake.radius + f.r + 2) {
-        // 吃掉
-        foods.splice(i, 1);
-        state.score++;
-        if (state.score > state.best) {
-          state.best = state.score;
-          try { localStorage.setItem('snake_joy_best', String(state.best)); } catch (_) {}
-        }
-        snake.length += snake.radius * 1.5;
-        state.shake = Math.min(1, state.shake + 0.5);
-
-        // 粒子爆炸
-        for (let p = 0; p < 10; p++) {
-          const a = Math.random() * Math.PI * 2;
-          const sp = 1 + Math.random() * 3;
-          particles.push({
-            x: f.x, y: f.y,
-            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-            life: 1, r: 1.5 + Math.random() * 2.5,
-            hue: 35 + Math.random() * 35,
-          });
-        }
-        
-        // 补充新食物
-        spawnFood(1);
-      }
+    // ---- 吃食物 ----
+    if (Math.hypot(snake.x - food.x, snake.y - food.y) < snake.radius + food.r + 2) {
+      eat();
     }
 
-    // 5. 边界碰撞
+    // ---- 撞墙 ----
     const r = snake.radius;
     if (snake.x < r || snake.x > W - r || snake.y < r || snake.y > H - r) {
       gameOver();
@@ -391,6 +349,7 @@
   function getSnakePoints() {
     const pts = [];
     if (!snake.path.length) return pts;
+
     const maxLen = snake.length;
     pts.push({ x: snake.path[0].x, y: snake.path[0].y });
 
@@ -414,6 +373,7 @@
   function drawBackground() {
     ctx.fillStyle = '#070a12';
     ctx.fillRect(-30, -30, W + 60, H + 60);
+
     ctx.fillStyle = bgGrad;
     ctx.fillRect(-30, -30, W + 60, H + 60);
 
@@ -427,35 +387,33 @@
     ctx.restore();
   }
 
-  function drawFoods() {
-    for (let f of foods) {
-      // 呼吸动画
-      const pulse = 1 + Math.sin(state.time * 0.005 + f.phase) * 0.15;
-      const r = f.r * pulse;
+  function drawFood() {
+    const pulse = 1 + Math.sin(state.time * 0.0045) * 0.13;
+    const r = food.r * pulse;
 
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, r * 2.2, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 170, 50, 0.06)';
-      ctx.fill();
+    // 外圈光晕
+    ctx.beginPath();
+    ctx.arc(food.x, food.y, r * 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 170, 50, 0.07)';
+    ctx.fill();
 
-      ctx.save();
-      ctx.shadowColor = 'rgba(255, 185, 60, 0.9)';
-      ctx.shadowBlur = 20;
+    ctx.save();
+    ctx.shadowColor = 'rgba(255, 185, 60, 0.95)';
+    ctx.shadowBlur = 26;
 
-      const g = ctx.createRadialGradient(
-        f.x - r * 0.3, f.y - r * 0.35, r * 0.1,
-        f.x, f.y, r
-      );
-      g.addColorStop(0, '#fff6cc');
-      g.addColorStop(0.45, '#ffc93c');
-      g.addColorStop(1, '#ff7a18');
+    const g = ctx.createRadialGradient(
+      food.x - r * 0.3, food.y - r * 0.35, r * 0.1,
+      food.x, food.y, r
+    );
+    g.addColorStop(0, '#fff6cc');
+    g.addColorStop(0.45, '#ffc93c');
+    g.addColorStop(1, '#ff7a18');
 
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = g;
-      ctx.fill();
-      ctx.restore();
-    }
+    ctx.beginPath();
+    ctx.arc(food.x, food.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
   }
 
   function drawParticles() {
@@ -481,10 +439,12 @@
     for (const s of [-1, 1]) {
       const ex = head.x + ca * fwd + nx * side * s;
       const ey = head.y + sa * fwd + ny * side * s;
+
       ctx.beginPath();
       ctx.arc(ex, ey, er, 0, Math.PI * 2);
       ctx.fillStyle = '#08161c';
       ctx.fill();
+
       ctx.beginPath();
       ctx.arc(ex + ca * er * 0.3, ey + sa * er * 0.3, er * 0.46, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
@@ -508,12 +468,14 @@
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
 
+    // 外层辉光
     ctx.shadowColor = 'rgba(45, 240, 190, 0.85)';
     ctx.shadowBlur = 28;
     ctx.strokeStyle = 'rgba(40, 220, 180, 0.16)';
     ctx.lineWidth = R * 2 + 14;
     ctx.stroke();
 
+    // 主体
     const dHeadTail = Math.hypot(head.x - tail.x, head.y - tail.y);
     let strokeStyle = '#35f0b8';
     if (dHeadTail > 2) {
@@ -530,125 +492,96 @@
     ctx.lineWidth = R * 2;
     ctx.stroke();
 
+    // 高光芯
     ctx.shadowBlur = 0;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
     ctx.lineWidth = R * 0.5;
     ctx.stroke();
 
     ctx.restore();
+
     drawEyes(head, R);
   }
 
-  function drawControls() {
-    // 1. 摇杆
+  function drawJoystick() {
     const { base, knob, radius, active } = joy;
+
     ctx.save();
+
+    // 底盘
     ctx.beginPath();
     ctx.arc(base.x, base.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.03)';
+    ctx.fillStyle = active ? 'rgba(255,255,255,0.065)' : 'rgba(255,255,255,0.035)';
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = active ? 'rgba(90, 240, 210, 0.6)' : 'rgba(90, 240, 210, 0.25)';
+    ctx.strokeStyle = active ? 'rgba(90, 240, 210, 0.6)' : 'rgba(90, 240, 210, 0.3)';
     ctx.stroke();
 
-    // 摇杆刻度
-    ctx.strokeStyle = active ? 'rgba(90, 240, 210, 0.25)' : 'rgba(90, 240, 210, 0.12)';
+    // 方向刻度
+    ctx.strokeStyle = active ? 'rgba(90, 240, 210, 0.28)' : 'rgba(90, 240, 210, 0.14)';
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 4; i++) {
       const a = i * Math.PI / 2;
-      const x1 = base.x + Math.cos(a) * radius * 0.7;
-      const y1 = base.y + Math.sin(a) * radius * 0.7;
+      const x1 = base.x + Math.cos(a) * radius * 0.72;
+      const y1 = base.y + Math.sin(a) * radius * 0.72;
       const x2 = base.x + Math.cos(a) * radius * 0.88;
       const y2 = base.y + Math.sin(a) * radius * 0.88;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
     }
 
     // 摇杆头
     const kx = active ? knob.x : base.x;
     const ky = active ? knob.y : base.y;
     const kr = radius * 0.42;
-    const g = ctx.createRadialGradient(kx - kr * 0.35, ky - kr * 0.35, kr * 0.08, kx, ky, kr);
+
+    const g = ctx.createRadialGradient(
+      kx - kr * 0.35, ky - kr * 0.35, kr * 0.08,
+      kx, ky, kr
+    );
     g.addColorStop(0, 'rgba(190, 255, 240, 0.98)');
     g.addColorStop(0.55, 'rgba(60, 235, 205, 0.95)');
     g.addColorStop(1, 'rgba(20, 165, 155, 0.9)');
+
     ctx.beginPath();
     ctx.arc(kx, ky, kr, 0, Math.PI * 2);
     ctx.fillStyle = g;
     ctx.shadowColor = 'rgba(60, 240, 210, 0.85)';
     ctx.shadowBlur = active ? 24 : 12;
     ctx.fill();
-    ctx.restore();
 
-    // 2. 加速键
-    ctx.save();
-    const br = boostBtn.r;
-    ctx.beginPath();
-    ctx.arc(boostBtn.x, boostBtn.y, br, 0, Math.PI * 2);
-    ctx.fillStyle = boostBtn.active ? 'rgba(255, 100, 50, 0.25)' : 'rgba(255, 255, 255, 0.05)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = boostBtn.active ? 'rgba(255, 120, 50, 0.8)' : 'rgba(255, 120, 50, 0.3)';
-    ctx.stroke();
-
-    // 双箭头图标
-    ctx.translate(boostBtn.x, boostBtn.y);
-    ctx.fillStyle = boostBtn.active ? '#ff7a18' : 'rgba(255, 120, 50, 0.5)';
-    ctx.beginPath();
-    ctx.moveTo(-10, -15); ctx.lineTo(10, 0); ctx.lineTo(-10, 15);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(-25, -15); ctx.lineTo(-5, 0); ctx.lineTo(-25, 15);
-    ctx.fill();
     ctx.restore();
   }
 
   function drawHUD() {
     ctx.save();
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
 
-    ctx.font = '600 12px -apple-system, "PingFang SC", sans-serif';
+    ctx.font = '600 12px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = 'rgba(120, 230, 210, 0.6)';
-    ctx.fillText('分数', W / 2, 16);
+    ctx.fillText('分数', 24, 20);
 
-    ctx.font = '700 36px -apple-system, "PingFang SC", sans-serif';
+    ctx.font = '700 34px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = '#eafff8';
     ctx.shadowColor = 'rgba(60, 240, 210, 0.85)';
     ctx.shadowBlur = 18;
-    ctx.fillText(String(state.score), W / 2, 34);
+    ctx.fillText(String(state.score), 24, 36);
 
+    ctx.textAlign = 'right';
     ctx.shadowBlur = 0;
-    ctx.font = '600 12px -apple-system, "PingFang SC", sans-serif';
+    ctx.font = '600 12px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = 'rgba(120, 230, 210, 0.55)';
-    ctx.fillText('最佳 ' + state.best, W / 2, 78);
+    ctx.fillText('最佳 ' + state.best, W - 24, 22);
 
     ctx.restore();
-  }
-
-  function drawPortraitWarning() {
-    ctx.fillStyle = '#070a12';
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.save();
-    ctx.translate(W / 2, H / 2 - 40);
-    ctx.strokeStyle = '#eafff8';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(-25, -40, 50, 80);
-    ctx.beginPath();
-    ctx.arc(0, 20, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#eafff8';
-    ctx.fill();
-    ctx.restore();
-
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.font = '600 18px -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('请旋转手机，横屏游玩', W / 2, H / 2 + 70);
   }
 
   function drawGameOver() {
     ctx.save();
-    ctx.fillStyle = 'rgba(4, 8, 14, 0.85)';
+    ctx.fillStyle = 'rgba(4, 8, 14, 0.8)';
     ctx.fillRect(0, 0, W, H);
 
     const cx = W / 2;
@@ -656,51 +589,48 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = '700 32px -apple-system, sans-serif';
+    ctx.font = '700 30px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = '#ff6b8a';
     ctx.shadowColor = 'rgba(255, 80, 120, 0.9)';
     ctx.shadowBlur = 26;
-    ctx.fillText('游戏结束', cx, cy - 60);
+    ctx.fillText('游戏结束', cx, cy - 78);
 
     ctx.shadowBlur = 0;
-    ctx.font = '500 15px -apple-system, sans-serif';
+    ctx.font = '500 15px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = 'rgba(200, 230, 235, 0.7)';
-    ctx.fillText('本次得分', cx, cy - 10);
+    ctx.fillText('本次得分', cx, cy - 16);
 
-    ctx.font = '800 60px -apple-system, sans-serif';
+    ctx.font = '800 58px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = '#eafff8';
     ctx.shadowColor = 'rgba(60, 240, 210, 0.9)';
     ctx.shadowBlur = 28;
-    ctx.fillText(String(state.score), cx, cy + 45);
+    ctx.fillText(String(state.score), cx, cy + 38);
 
     ctx.shadowBlur = 0;
     const pulse = 0.5 + Math.sin(state.time * 0.005) * 0.4;
-    ctx.font = '600 15px -apple-system, sans-serif';
+    ctx.font = '600 15px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillStyle = `rgba(120, 240, 220, ${pulse})`;
-    ctx.fillText('点击屏幕重新开始', cx, cy + 125);
+    ctx.fillText('点击屏幕 / 按空格 重新开始', cx, cy + 126);
 
     ctx.restore();
   }
 
   function draw() {
-    if (state.isPortrait) {
-      drawPortraitWarning();
-      return;
-    }
-
     ctx.save();
+
     if (state.shake > 0) {
       const s = state.shake * 7;
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
 
     drawBackground();
-    drawFoods();
+    drawFood();
     drawParticles();
     drawSnake();
+
     ctx.restore();
 
-    drawControls();
+    drawJoystick();
     drawHUD();
 
     if (state.over) drawGameOver();
@@ -708,6 +638,7 @@
 
   /* ---------------- 主循环 ---------------- */
   let lastT = 0;
+
   function loop(t) {
     if (!lastT) lastT = t;
     let dt = (t - lastT) / 16.6667;
@@ -717,6 +648,7 @@
 
     update(dt);
     draw();
+
     requestAnimationFrame(loop);
   }
 
